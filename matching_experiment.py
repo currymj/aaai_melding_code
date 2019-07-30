@@ -57,6 +57,9 @@ def ind_counts_to_longs(arrival_counts):
             results.append(i)
     return torch.LongTensor(results)
 
+def arrivals_only(current_elems, type_arrival_rates):
+    return torch.cat((current_elems, ind_counts_to_longs(torch.poisson(type_arrival_rates))))
+
 def step_simulation(current_elems, match_edges, type_arrival_rates, type_departure_probs, match_thresh=0.8):
     # first match elements
     pool_after_match = current_elems[torch.max(match_edges, 0).values <= match_thresh]
@@ -104,30 +107,32 @@ def compute_matching(current_elems, curr_type_weights, e_weights_by_type, gamma=
 
 def toy_e_weights_type():
     mat = 0.1*torch.ones(5,5)
-    mat[0,1] = 10.0
-    mat[1,0] = 10.0
-    mat[0,0] = 0.0
-    mat[0,2:5] = 0.0
-    mat[2:5,0] = 0.0
+    mat[0,1] = 3.0
+    mat[1,0] = 3.0
+    mat[0,0] = -1.0
+    mat[0,2:5] = -1.0
+    mat[2:5,0] = -1.0
     return mat
 
 toy_arrival_rates = torch.Tensor([0.2,1.0,1.0,1.0,1.0])
-toy_departure_probs = torch.Tensor([0.9,0.1,0.1,0.1,0.1])
+toy_departure_probs = torch.Tensor([0.9,0.05,0.1,0.1,0.1])
 
-def train_func(n_rounds=20, n_epochs=20):
+def train_func(n_rounds=50, n_epochs=20):
     e_weights_type = toy_e_weights_type()
     init_pool = torch.LongTensor([1,1,2,2])
-    type_weights = torch.full((5,), 0.05, requires_grad=True)
-    optimizer = torch.optim.Adam([type_weights], lr=5e-2, weight_decay=1e-2)
+    type_weights = torch.full((5,), 0.0, requires_grad=True)
+    optimizer = torch.optim.Adam([type_weights], lr=1e-1)
     total_losses = []
     for e in tqdm(range(n_epochs)):
         optimizer.zero_grad()
         losses = []
         curr_pool = init_pool.clone()
         for r in range(n_rounds):
+            if len(curr_pool) <= 1:
+                curr_pool = arrivals_only(curr_pool, toy_arrival_rates)
+                continue
             resulting_match, e_weights = compute_matching(curr_pool, type_weights, e_weights_type)
-            print(resulting_match)
-            losses.append(-1.0*torch.sum(resulting_match * e_weights))
+            losses.append(-1.0*torch.sum(e_weights * resulting_match))
             curr_pool = step_simulation(curr_pool, resulting_match, toy_arrival_rates, toy_departure_probs)
         total_loss = torch.sum(torch.stack(losses))
         total_losses.append(total_loss.item())
@@ -135,7 +140,7 @@ def train_func(n_rounds=20, n_epochs=20):
         optimizer.step()
     return type_weights, total_losses
 
-def eval_func(trained_weights, n_rounds = 30, n_epochs=10):
+def eval_func(trained_weights, n_rounds = 50, n_epochs=100):
     e_weights_type = toy_e_weights_type()
     type_weights = trained_weights.detach()
     init_pool = torch.LongTensor([1,1,2,2])
@@ -144,19 +149,31 @@ def eval_func(trained_weights, n_rounds = 30, n_epochs=10):
         losses = []
         curr_pool = init_pool.clone()
         for r in range(n_rounds):
+            if len(curr_pool) <= 1:
+                curr_pool = arrivals_only(curr_pool, toy_arrival_rates)
+                continue
             resulting_match, e_weights = compute_matching(curr_pool, type_weights, e_weights_type)
             losses.append(-1.0*torch.sum(resulting_match * e_weights).item())
             curr_pool = step_simulation(curr_pool, resulting_match, toy_arrival_rates, toy_departure_probs)
+        if len(losses) == 0:
+            losses.append(0.0)
         all_losses.append(losses)
     return all_losses
 
 if __name__ == '__main__':
-    result_weights, learning_loss = train_func()
+    result_weights, learning_loss = train_func(n_epochs=100)
     print(learning_loss)
     print(result_weights)
-    loss_list = eval_func(result_weights, n_epochs=30)
-    print('loss of learned weights:', np.mean(np.sum(loss_list, axis=1)))
+    loss_list = eval_func(result_weights, n_epochs=100)
+    print('loss of learned weights:', np.mean([np.sum(l) for l in loss_list]))
+    print('std of learned weights:', np.std([np.sum(l) for l in loss_list]))
     
     
-    ones_loss_list = eval_func(torch.ones(5), n_epochs=30)
-    print('loss of constant weights:', np.mean(np.sum(ones_loss_list,axis=1)))
+    const_loss_list = eval_func(torch.full((5,), 0.0, requires_grad=False), n_epochs=100)
+    
+    print('loss of initial constant weights:', np.mean([np.sum(l) for l in const_loss_list]))
+    print('std of initial constant weights:', np.std([np.sum(l) for l in const_loss_list]))
+    hand_loss_list = eval_func(torch.Tensor([0.2,-0.2,0.1,0.1,0.1]), n_epochs=100)
+    
+    print('loss of handpicked weights:', np.mean([np.sum(l) for l in hand_loss_list]))
+    print('std of handpicked weights:', np.std([np.sum(l) for l in hand_loss_list]))
