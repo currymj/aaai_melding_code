@@ -79,7 +79,7 @@ def edge_matrix(current_elems, e_weights_by_type):
     rhs_matrix = lhs_matrix.t()
     return e_weights_by_type[lhs_matrix, rhs_matrix]
 
-def compute_matching(current_elems, curr_type_weights, e_weights_by_type, gamma=0.00001):
+def compute_matching(current_elems, curr_type_weights, e_weights_by_type, gamma=0.000001):
     n = current_elems.shape[0]
     A, b = make_matching_matrix(n)
     A = torch.from_numpy(A).float()
@@ -106,9 +106,9 @@ def toy_e_weights_type():
     mat = 0.1*torch.ones(5,5)
     mat[0,1] = 10.0
     mat[1,0] = 10.0
-    mat[0,0] = -1.0
-    mat[0,2:5] = -1.0
-    mat[2:5,0] = -1.0
+    mat[0,0] = 0.0
+    mat[0,2:5] = 0.0
+    mat[2:5,0] = 0.0
     return mat
 
 toy_arrival_rates = torch.Tensor([0.2,1.0,1.0,1.0,1.0])
@@ -117,8 +117,8 @@ toy_departure_probs = torch.Tensor([0.9,0.1,0.1,0.1,0.1])
 def train_func(n_rounds=20, n_epochs=20):
     e_weights_type = toy_e_weights_type()
     init_pool = torch.LongTensor([1,1,2,2])
-    type_weights = torch.ones(5, requires_grad=True)
-    optimizer = torch.optim.Adam([type_weights], lr=1e-1, weight_decay=1e-2)
+    type_weights = torch.full((5,), 0.05, requires_grad=True)
+    optimizer = torch.optim.Adam([type_weights], lr=5e-2, weight_decay=1e-2)
     total_losses = []
     for e in tqdm(range(n_epochs)):
         optimizer.zero_grad()
@@ -126,6 +126,7 @@ def train_func(n_rounds=20, n_epochs=20):
         curr_pool = init_pool.clone()
         for r in range(n_rounds):
             resulting_match, e_weights = compute_matching(curr_pool, type_weights, e_weights_type)
+            print(resulting_match)
             losses.append(-1.0*torch.sum(resulting_match * e_weights))
             curr_pool = step_simulation(curr_pool, resulting_match, toy_arrival_rates, toy_departure_probs)
         total_loss = torch.sum(torch.stack(losses))
