@@ -109,9 +109,9 @@ def toy_e_weights_type():
     mat = 0.1*torch.ones(5,5)
     mat[0,1] = 3.0
     mat[1,0] = 3.0
-    mat[0,0] = -1.0
-    mat[0,2:5] = -1.0
-    mat[2:5,0] = -1.0
+    mat[0,0] = -100.0
+    mat[0,2:5] = -100.0
+    mat[2:5,0] = -100.0
     return mat
 
 toy_arrival_rates = torch.Tensor([0.2,1.0,1.0,1.0,1.0])
@@ -119,7 +119,7 @@ toy_departure_probs = torch.Tensor([0.9,0.05,0.1,0.1,0.1])
 
 def train_func(n_rounds=50, n_epochs=20):
     e_weights_type = toy_e_weights_type()
-    init_pool = torch.LongTensor([1,1,2,2])
+    init_pool = torch.LongTensor([])
     type_weights = torch.full((5,), 0.0, requires_grad=True)
     optimizer = torch.optim.Adam([type_weights], lr=1e-1)
     total_losses = []
@@ -132,7 +132,7 @@ def train_func(n_rounds=50, n_epochs=20):
                 curr_pool = arrivals_only(curr_pool, toy_arrival_rates)
                 continue
             resulting_match, e_weights = compute_matching(curr_pool, type_weights, e_weights_type)
-            losses.append(-1.0*torch.sum(e_weights * resulting_match))
+            losses.append(1.0*torch.sum(e_weights * resulting_match))
             curr_pool = step_simulation(curr_pool, resulting_match, toy_arrival_rates, toy_departure_probs)
         total_loss = torch.sum(torch.stack(losses))
         total_losses.append(total_loss.item())
@@ -143,7 +143,7 @@ def train_func(n_rounds=50, n_epochs=20):
 def eval_func(trained_weights, n_rounds = 50, n_epochs=100):
     e_weights_type = toy_e_weights_type()
     type_weights = trained_weights.detach()
-    init_pool = torch.LongTensor([1,1,2,2])
+    init_pool = torch.LongTensor([])
     all_losses = []
     for e in tqdm(range(n_epochs)):
         losses = []
@@ -153,7 +153,7 @@ def eval_func(trained_weights, n_rounds = 50, n_epochs=100):
                 curr_pool = arrivals_only(curr_pool, toy_arrival_rates)
                 continue
             resulting_match, e_weights = compute_matching(curr_pool, type_weights, e_weights_type)
-            losses.append(-1.0*torch.sum(resulting_match * e_weights).item())
+            losses.append(1.0*torch.sum(resulting_match * e_weights).item())
             curr_pool = step_simulation(curr_pool, resulting_match, toy_arrival_rates, toy_departure_probs)
         if len(losses) == 0:
             losses.append(0.0)
