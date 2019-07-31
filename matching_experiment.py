@@ -121,7 +121,7 @@ def train_func(n_rounds=50, n_epochs=20):
     e_weights_type = toy_e_weights_type()
     init_pool = torch.LongTensor([])
     type_weights = torch.full((5,), 0.0, requires_grad=True)
-    optimizer = torch.optim.Adam([type_weights], lr=1e-1)
+    optimizer = torch.optim.Adam([type_weights], lr=1e-1, weight_decay=1e-1)
     total_losses = []
     for e in tqdm(range(n_epochs)):
         optimizer.zero_grad()
@@ -161,19 +161,21 @@ def eval_func(trained_weights, n_rounds = 50, n_epochs=100):
     return all_losses
 
 if __name__ == '__main__':
-    result_weights, learning_loss = train_func(n_epochs=100)
-    print(learning_loss)
-    print(result_weights)
-    loss_list = eval_func(result_weights, n_epochs=100)
-    print('loss of learned weights:', np.mean([np.sum(l) for l in loss_list]))
-    print('std of learned weights:', np.std([np.sum(l) for l in loss_list]))
-    
-    
-    const_loss_list = eval_func(torch.full((5,), 0.0, requires_grad=False), n_epochs=100)
-    
-    print('loss of initial constant weights:', np.mean([np.sum(l) for l in const_loss_list]))
-    print('std of initial constant weights:', np.std([np.sum(l) for l in const_loss_list]))
-    hand_loss_list = eval_func(torch.Tensor([0.2,-0.2,0.1,0.1,0.1]), n_epochs=100)
-    
-    print('loss of handpicked weights:', np.mean([np.sum(l) for l in hand_loss_list]))
-    print('std of handpicked weights:', np.std([np.sum(l) for l in hand_loss_list]))
+    for i in range(5):
+        print(i)
+        result_weights, learning_loss = train_func(n_epochs=200)
+        print(learning_loss)
+        print(result_weights)
+        loss_list = eval_func(result_weights, n_epochs=500)
+        print('loss of learned weights:', np.mean([np.sum(l) for l in loss_list]))
+        print('std of learned weights:', np.std([np.sum(l) for l in loss_list]))
+        
+        
+        const_loss_list = eval_func(torch.full((5,), 0.0, requires_grad=False), n_epochs=100)
+        
+        print('loss of initial constant weights:', np.mean([np.sum(l) for l in const_loss_list]))
+        print('std of initial constant weights:', np.std([np.sum(l) for l in const_loss_list]))
+        hand_loss_list = eval_func(torch.Tensor([0.2,-0.2,0.1,0.1,0.1]), n_epochs=100)
+        
+        print('loss of handpicked weights:', np.mean([np.sum(l) for l in hand_loss_list]))
+        print('std of handpicked weights:', np.std([np.sum(l) for l in hand_loss_list]))
