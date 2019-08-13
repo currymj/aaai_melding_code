@@ -10,6 +10,12 @@ import argparse
 import matplotlib.pyplot as plt
 from tqdm import tqdm as tqdm
 
+
+# matching matrix here corresponds to constraints only.
+# so for kidneys we need to make the "each node in <= 1 cycle" constraint
+# also we want to force cycle variables to be positive, as in edges below.
+
+
 def make_matching_matrix(n):
     
     # n is num elements?
@@ -172,17 +178,34 @@ def eval_func(trained_weights, n_rounds = 50, n_epochs=100):
     return all_losses
 
 if __name__ == '__main__':
-    for i in range(5):
+    results_list = []
+    train_epochs = 30
+    test_epochs = 50
+    n_experiments = 5
+    for i in range(n_experiments):
         print(i)
-        result_weights, learning_loss = train_func(n_epochs=30)
+        result_weights, learning_loss = train_func(n_epochs=train_epochs)
         print(learning_loss)
         print(result_weights)
-        loss_list = eval_func(result_weights, n_epochs=30)
-        print('loss of learned weights:', np.mean([np.sum(l) for l in loss_list]))
-        print('std of learned weights:', np.std([np.sum(l) for l in loss_list]))
+        loss_list = eval_func(result_weights, n_epochs=test_epochs)
+        learned_loss = np.mean([np.sum(l) for l in loss_list])
+        learned_std = np.std([np.sum(l) for l in loss_list])
+        print('loss of learned weights:', learned_loss)
+        print('std of learned weights:', learned_std)
         
         
-        const_loss_list = eval_func(torch.full((5,), 0.0, requires_grad=False), n_epochs=30)
-        
-        print('loss of initial constant weights:', np.mean([np.sum(l) for l in const_loss_list]))
-        print('std of initial constant weights:', np.std([np.sum(l) for l in const_loss_list]))
+        const_loss_list = eval_func(torch.full((5,), 0.0, requires_grad=False), n_epochs=test_epochs)
+        const_loss = np.mean([np.sum(l) for l in const_loss_list])
+        const_std = np.std([np.sum(l) for l in const_loss_list])
+        print('loss of initial constant weights:', const_loss)
+        print('std of initial constant weights:', const_std)
+        results_list.append( (learned_loss, learned_std, const_loss, const_std) )
+
+    for i in range(n_experiments):
+        print('experiment', i)
+        losses = results_list[i]
+        learned_ci = 1.96 * losses[1] / np.sqrt(test_epochs)
+        const_ci =  1.96 * losses[3] / np.sqrt(test_epochs)
+
+        print(f"learned weights mean: {losses[0]} +/- {learned_ci}")
+        print(f"constant weights mean: {losses[2]} +/- {const_ci}")
