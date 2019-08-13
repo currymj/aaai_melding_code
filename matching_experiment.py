@@ -68,6 +68,8 @@ def arrivals_only(current_elems, type_arrival_rates):
 
 def step_simulation(current_elems, match_edges, type_arrival_rates, type_departure_probs, match_thresh=0.8):
     # first match elements
+    # keep all elements if the largest in their row does not meet the match
+    # threshold
     pool_after_match = current_elems[torch.max(match_edges, 0).values <= match_thresh]
     
     # now handle departures
