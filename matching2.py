@@ -9,7 +9,7 @@ import pickle
 import argparse
 import matplotlib.pyplot as plt
 from tqdm import tqdm as tqdm
-
+from collections import defaultdict
 
 # matching matrix here corresponds to constraints only.
 # so for kidneys we need to make the "each node in <= 1 cycle" constraint
@@ -95,26 +95,35 @@ def generate_full_history(type_arrival_rates, type_departure_probs, max_t):
 
     return all_elems
 
+def history_to_arrival_dict(full_history):
+    result = defaultdict(list)
+    for v in full_history:
+        result[v[1]].append(v)
+    return result
 
 
-def arrivals_only(current_elems, type_arrival_rates):
-    return torch.cat((current_elems, ind_counts_to_longs(torch.poisson(type_arrival_rates))))
+def arrivals_only(current_elems, t_to_arrivals, curr_t):
+    return current_elems + t_to_arrivals[curr_t]
 
 
-def step_simulation(current_elems, match_edges, type_arrival_rates, type_departure_probs, match_thresh=0.8):
-    # first match elements
-    pool_after_match = current_elems[torch.max(match_edges, 0).values <= match_thresh]
+def step_simulation(current_elems, match_edges, t_to_arrivals, curr_t, match_thresh=0.8):
+    unmatched_indices = (torch.max(match_edges, 0).values <= match_thresh).nonzero().flatten().numpy()
+
+    # get locations of maxima
+    # remove from current_elems if the maxima are <= match_threshold.
+
+    pool_after_match = []
+    for i in range(len(current_elems)):
+        if i in unmatched_indices:
+            pool_after_match.append(current_elems[i])
     
-    # now handle departures
-    if pool_after_match.shape[0] > 0:
-        remaining_elements_depart_prob = type_departure_probs[pool_after_match]
-        remain = torch.bernoulli(1 - remaining_elements_depart_prob).nonzero().view(-1)
-        remaining_elements = pool_after_match[remain]
-    else:
-        remaining_elements = pool_after_match
-    
+    remaining_elements = [] 
+    for v in pool_after_match:
+        if v[2] > curr_t:
+            remaining_elements.append(v)
+
     # now get new elements (poisson?)
-    after_arrivals = torch.cat((remaining_elements, ind_counts_to_longs(torch.poisson(type_arrival_rates))))
+    after_arrivals = remaining_elements + t_to_arrivals[curr_t]
     
     return after_arrivals
 
@@ -123,7 +132,9 @@ def edge_matrix(current_elems, e_weights_by_type):
     rhs_matrix = lhs_matrix.t()
     return e_weights_by_type[lhs_matrix, rhs_matrix]
 
-def compute_matching(current_elems, curr_type_weights, e_weights_by_type, gamma=0.000001):
+def compute_matching(current_pool_list, curr_type_weights, e_weights_by_type, gamma=0.000001):
+    # convert current_elems to LongTensor of correct form here
+    current_elems = torch.tensor([x[0] for x in current_pool_list])
     n = current_elems.shape[0]
     A, b = make_matching_matrix(n)
     A = torch.from_numpy(A).float()
@@ -171,21 +182,22 @@ def compute_discounted_returns(losses, gamma=1.0):
         
 def train_func(n_rounds=50, n_epochs=20):
     e_weights_type = toy_e_weights_type()
-    init_pool = torch.LongTensor([])
     type_weights = torch.full((5,), 0.0, requires_grad=True)
     optimizer = torch.optim.Adam([type_weights], lr=1e-1, weight_decay=1e-1)
     total_losses = []
     for e in tqdm(range(n_epochs)):
+        full_history = generate_full_history(toy_arrival_rates, toy_departure_probs, n_rounds)
+        t_to_arrivals = history_to_arrival_dict(full_history)
         optimizer.zero_grad()
         losses = []
-        curr_pool = init_pool.clone()
+        curr_pool = []
         for r in range(n_rounds):
             if len(curr_pool) <= 1:
-                curr_pool = arrivals_only(curr_pool, toy_arrival_rates)
+                curr_pool = arrivals_only(curr_pool, t_to_arrivals, r)
                 continue
             resulting_match, e_weights = compute_matching(curr_pool, type_weights, e_weights_type)
             losses.append(1.0*torch.sum(e_weights * resulting_match))
-            curr_pool = step_simulation(curr_pool, resulting_match, toy_arrival_rates, toy_departure_probs)
+            curr_pool = step_simulation(curr_pool, resulting_match, t_to_arrivals, r)
         total_loss = torch.sum(torch.stack(compute_discounted_returns(losses)))
         total_losses.append(total_loss.item())
         total_loss.backward()
@@ -195,27 +207,26 @@ def train_func(n_rounds=50, n_epochs=20):
 def eval_func(trained_weights, n_rounds = 50, n_epochs=100):
     e_weights_type = toy_e_weights_type()
     type_weights = trained_weights.detach()
-    init_pool = torch.LongTensor([])
     all_losses = []
     for e in tqdm(range(n_epochs)):
+        full_history = generate_full_history(toy_arrival_rates, toy_departure_probs, n_rounds)
+        t_to_arrivals = history_to_arrival_dict(full_history)
         losses = []
-        curr_pool = init_pool.clone()
+        curr_pool = []
         for r in range(n_rounds):
             if len(curr_pool) <= 1:
-                curr_pool = arrivals_only(curr_pool, toy_arrival_rates)
+                curr_pool = arrivals_only(curr_pool, t_to_arrivals, r)
                 continue
             resulting_match, e_weights = compute_matching(curr_pool, type_weights, e_weights_type)
             losses.append(1.0*torch.sum(resulting_match * e_weights).item())
-            curr_pool = step_simulation(curr_pool, resulting_match, toy_arrival_rates, toy_departure_probs)
+            curr_pool = step_simulation(curr_pool, resulting_match, t_to_arrivals, r)
         if len(losses) == 0:
             losses.append(0.0)
         all_losses.append(losses)
     return all_losses
 
-if __name__ == '__main__':
-    print(generate_full_history(toy_arrival_rates, toy_departure_probs, 10))
 
-if __name__ == '__xxx__':
+if __name__ == '__main__':
     results_list = []
     train_epochs = 30
     test_epochs = 50
