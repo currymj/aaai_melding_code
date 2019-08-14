@@ -106,7 +106,7 @@ def arrivals_only(current_elems, t_to_arrivals, curr_t):
     return current_elems + t_to_arrivals[curr_t]
 
 
-def step_simulation(current_elems, match_edges, t_to_arrivals, curr_t, match_thresh=0.8):
+def step_simulation(current_elems, match_edges, t_to_arrivals, curr_t, match_thresh=0.6):
     unmatched_indices = (torch.max(match_edges, 0).values <= match_thresh).nonzero().flatten().numpy()
 
     # get locations of maxima
@@ -250,7 +250,7 @@ def opt_score(history, max_t, e_weights_type):
     varwise_edge_weights = {}
     for i, node_info_i in enumerate(history):
         for j, node_info_j in enumerate(history):
-            random_jitter = random.random() * 1e-5
+            random_jitter = random.random() * 1e-4
             i_type = node_info_i[0]
             j_type = node_info_j[0]
             varwise_edge_weights[i,j] = e_weights_type[i_type, j_type].item()
@@ -275,6 +275,14 @@ def opt_score(history, max_t, e_weights_type):
 
     return total_positive_obj
 
+def true_match_loss(resulting_match, e_weights, match_thresh=0.6):
+    maxinds = torch.max(resulting_match, 0).indices
+    total_loss = 0.0
+    for i in range(e_weights.shape[1]):
+        if resulting_match[maxinds[i],i].item() > match_thresh:
+            total_loss += e_weights[maxinds[i], i].item()
+    return total_loss
+
 def eval_func(list_of_histories, trained_weights, n_rounds = 50, n_epochs=100):
     e_weights_type = toy_e_weights_type()
     type_weights = trained_weights.detach()
@@ -289,7 +297,14 @@ def eval_func(list_of_histories, trained_weights, n_rounds = 50, n_epochs=100):
                 curr_pool = arrivals_only(curr_pool, t_to_arrivals, r)
                 continue
             resulting_match, e_weights = compute_matching(curr_pool, type_weights, e_weights_type)
-            losses.append(1.0*torch.sum(resulting_match * e_weights).item())
+            #losses.append(1.0*torch.sum(resulting_match * e_weights).item())
+            #old_loss = 1.0*torch.sum(resulting_match * e_weights).item()
+            #new_loss = 1.0*true_match_loss(resulting_match, e_weights)
+            #if abs(new_loss - old_loss) > 0.1:
+                #print(f'old - new: {old_loss - new_loss}')
+                #print(resulting_match)
+                #print(e_weights)
+            losses.append(1.0*true_match_loss(resulting_match, e_weights))
             curr_pool = step_simulation(curr_pool, resulting_match, t_to_arrivals, r)
         if len(losses) == 0:
             losses.append(0.0)
@@ -306,7 +321,7 @@ if __name__ == '__main__':
     results_list = []
     train_epochs = 30
     test_epochs = 50
-    n_experiments = 5
+    n_experiments = 1
     n_rounds=50
     edge_weights = toy_e_weights_type()
 
@@ -332,14 +347,16 @@ if __name__ == '__main__':
         print('std of initial constant weights:', const_std)
 
 
-        print('computing OPT scores')
-        optimal_loss_list = [opt_score(h, n_rounds, edge_weights) for h in tqdm(test_histories)]
+        #print('computing OPT scores')
+        #optimal_loss_list = [opt_score(h, n_rounds, edge_weights) for h in tqdm(test_histories)]
 
-        learned_regret = [(optimal - l) for (l, optimal) in zip([np.sum(l) for l in loss_list], optimal_loss_list)]
+        #learned_regret = [(optimal - l) for (l, optimal) in zip([np.sum(l) for l in loss_list], optimal_loss_list)]
+        learned_regret = [0.0]
         learned_regret_mean = np.mean(learned_regret)
         learned_regret_std = np.std(learned_regret)
 
-        const_regret = [(optimal - l) for (l, optimal) in zip([np.sum(l) for l in const_loss_list], optimal_loss_list)]
+        #const_regret = [(optimal - l) for (l, optimal) in zip([np.sum(l) for l in const_loss_list], optimal_loss_list)]
+        const_regret= [0.0]
         const_regret_mean = np.mean(const_regret)
         const_regret_std = np.std(const_regret)
 
