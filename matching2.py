@@ -19,37 +19,28 @@ from collections import defaultdict
 def make_matching_matrix(n):
     
     # n is num elements?
-    lhs = list(range(n))
-    rhs = list(range(n, 2*n))
     
     # n_vars is 1 per possible edge?
-    n_vars = len(lhs)*len(rhs)
+    n_vars = n*n
     # n_constraints is 1 for each lhs, 1 for each rhs, 1 per edge?
-    n_constraints = len(lhs) + len(rhs) + n_vars
+    n_constraints = 2 * n_vars
     A = np.zeros((n_constraints, n_vars))
     b = np.zeros((n_constraints))
     curr_idx = 0
     edge_idx = {}
     # get an index per edge
-    for u in lhs:
-        for v in rhs:
+    for u in range(n):
+        for v in range(n):
             edge_idx[(u,v)] = curr_idx
             curr_idx += 1
-    # A has rows of 2n elements, followed by n^2 edges
-    # A has cols of n^2 edges (so A @ x where x is edges)
-    for u in lhs:
-        for v in rhs:
-            # for u, flip on coefficient for only its outgoing edges
+    # matching program constraints 
+    for u in range(n):
+        for v in range(n):
             A[u, edge_idx[(u,v)]] = 1
-            # for v, flip on coefficient for only its incoming edges
-            A[v, edge_idx[(u,v)]] = 1
-            # for the edge itself, flip on a single -1 at its point only (- point must be <= 0 i.e. point must be positive)
-            A[len(lhs)+len(rhs)+edge_idx[(u,v)], edge_idx[(u,v)]] = -1
-    
+            A[n_vars+edge_idx[(u, v)], edge_idx[(u, v)]] = -1
+
     # each element can have only 1 edge turned on in x
-    for u in lhs:
-        b[u] = 1
-    for u in rhs:
+    for u in range(n):
         b[u] = 1
     
     
@@ -314,10 +305,6 @@ def eval_func(list_of_histories, trained_weights, n_rounds = 50, n_epochs=100):
         all_losses.append(losses)
     return all_losses
 
-if __name__ == '__xxx__':
-    hist = generate_full_history(toy_arrival_rates, toy_departure_probs, 50)
-    edge_weights = toy_e_weights_type()
-    opt_score(hist, 50, edge_weights)
 
 
 if __name__ == '__main__':
