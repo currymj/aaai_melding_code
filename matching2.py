@@ -180,13 +180,13 @@ def compute_discounted_returns(losses, gamma=1.0):
     return returns
 
         
-def train_func(n_rounds=50, n_epochs=20):
+def train_func(list_of_histories, n_rounds=50, n_epochs=20):
     e_weights_type = toy_e_weights_type()
     type_weights = torch.full((5,), 0.0, requires_grad=True)
     optimizer = torch.optim.Adam([type_weights], lr=1e-1, weight_decay=1e-1)
     total_losses = []
     for e in tqdm(range(n_epochs)):
-        full_history = generate_full_history(toy_arrival_rates, toy_departure_probs, n_rounds)
+        full_history = list_of_histories[e]
         t_to_arrivals = history_to_arrival_dict(full_history)
         optimizer.zero_grad()
         losses = []
@@ -204,12 +204,12 @@ def train_func(n_rounds=50, n_epochs=20):
         optimizer.step()
     return type_weights, total_losses
 
-def eval_func(trained_weights, n_rounds = 50, n_epochs=100):
+def eval_func(list_of_histories, trained_weights, n_rounds = 50, n_epochs=100):
     e_weights_type = toy_e_weights_type()
     type_weights = trained_weights.detach()
     all_losses = []
     for e in tqdm(range(n_epochs)):
-        full_history = generate_full_history(toy_arrival_rates, toy_departure_probs, n_rounds)
+        full_history = list_of_histories[e]
         t_to_arrivals = history_to_arrival_dict(full_history)
         losses = []
         curr_pool = []
@@ -231,19 +231,25 @@ if __name__ == '__main__':
     train_epochs = 30
     test_epochs = 50
     n_experiments = 5
+    n_rounds=50
+
     for i in range(n_experiments):
+        print('generating histories for training')
+        list_of_histories = [generate_full_history(toy_arrival_rates, toy_departure_probs, n_rounds) for e in tqdm(range(train_epochs))]
         print(i)
-        result_weights, learning_loss = train_func(n_epochs=train_epochs)
+        result_weights, learning_loss = train_func(list_of_histories, n_epochs=train_epochs)
         print(learning_loss)
         print(result_weights)
-        loss_list = eval_func(result_weights, n_epochs=test_epochs)
+        print('generating histories for testing')
+        test_histories = [generate_full_history(toy_arrival_rates, toy_departure_probs, n_rounds) for e in tqdm(range(test_epochs))]
+        loss_list = eval_func(test_histories, result_weights, n_epochs=test_epochs)
         learned_loss = np.mean([np.sum(l) for l in loss_list])
         learned_std = np.std([np.sum(l) for l in loss_list])
         print('loss of learned weights:', learned_loss)
         print('std of learned weights:', learned_std)
         
         
-        const_loss_list = eval_func(torch.full((5,), 0.0, requires_grad=False), n_epochs=test_epochs)
+        const_loss_list = eval_func(test_histories, torch.full((5,), 0.0, requires_grad=False), n_epochs=test_epochs)
         const_loss = np.mean([np.sum(l) for l in const_loss_list])
         const_std = np.std([np.sum(l) for l in const_loss_list])
         print('loss of initial constant weights:', const_loss)
