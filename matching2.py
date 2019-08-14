@@ -47,7 +47,7 @@ def make_matching_matrix(n):
         b[u] = 1
     
     
-    return A, b
+    return A, b, edge_idx
 
 def ind_counts_to_longs(arrival_counts):
     # optimize later
@@ -100,6 +100,7 @@ def arrivals_only(current_elems, t_to_arrivals, curr_t):
     return current_elems + t_to_arrivals[curr_t]
 
 def true_match_loss(resulting_match, e_weights, match_thresh=0.6):
+    raise NotImplementedError
     maxinds = torch.max(resulting_match, 0).indices
     total_loss = 0.0
     for i in range(e_weights.shape[1]):
@@ -107,14 +108,28 @@ def true_match_loss(resulting_match, e_weights, match_thresh=0.6):
             total_loss += e_weights[maxinds[i], i].item()
     return total_loss
 
+def edge_ind_tensors(n):
+    x_coords = []
+    y_coords = []
+    for x in range(n):
+        for y in range(x, n):
+            x_coords.append(x)
+            y_coords.append(y)
+    return torch.LongTensor(x_coords), torch.LongTensor(y_coords)
+
 def step_simulation(current_elems, match_edges, e_weights, t_to_arrivals, curr_t, match_thresh=0.6):
     print(current_elems)
     print(match_edges)
-    unmatched_indices = (torch.max(match_edges, 0).values < match_thresh).nonzero().flatten().numpy()
 
-    matched_indices = (torch.max(match_edges, 0).values >= match_thresh).nonzero().flatten().numpy()
-    assert(len(unmatched_indices) + len(matched_indices) == len(current_elems))
+    x_inds, y_inds = edge_ind_tensors(len(current_elems))
+    matched_indices = (match_edges.flatten() > 0.8).nonzero().numpy()
+    print(x_inds[matched_indices.flatten()])
+    #unmatched_indices = (torch.max(match_edges, 0).values < match_thresh).nonzero().flatten().numpy()
 
+    #matched_indices = (torch.max(match_edges, 0).values >= match_thresh).nonzero().flatten().numpy()
+    #assert(len(unmatched_indices) + len(matched_indices) == len(current_elems))
+
+    raise NotImplementedError
     # get locations of maxima
     # remove from current_elems if the maxima are <= match_threshold.
 
@@ -143,10 +158,16 @@ def edge_matrix(current_elems, x_inds, y_inds, e_weights_by_type):
 
     return e_weights_by_type[left_types, right_types]
 
+def forbid_self_match(e_weights, edge_idx, n):
+    for v in range(n):
+        e_weights[edge_idx[(v,v)]] = -100.0
+    return e_weights
+
 
 def edge_ind_tensors(n):
     x_coords = []
     y_coords = []
+
     for x in range(n):
         for y in range(x, n):
             x_coords.append(x)
@@ -157,7 +178,7 @@ def compute_matching(current_pool_list, curr_type_weights, e_weights_by_type, ga
     # convert current_elems to LongTensor of correct form here
     current_elems = torch.tensor([x[0] for x in current_pool_list])
     n = current_elems.shape[0]
-    A, b = make_matching_matrix(n)
+    A, b, edge_idx = make_matching_matrix(n)
     x_inds, y_inds = edge_ind_tensors(n)
     A = torch.from_numpy(A).float()
     b = torch.from_numpy(b).float()
@@ -165,7 +186,7 @@ def compute_matching(current_pool_list, curr_type_weights, e_weights_by_type, ga
     # for some reason we need this randomness to end up with an actual matching
     e_weights = edge_matrix(current_elems, x_inds, y_inds, e_weights_by_type)
     # change jitter to be n(n-1)/2 + n
-    jitter_e_weights = e_weights + 1e-4*torch.rand(*e_weights.shape)
+    jitter_e_weights = e_weights + 1e-3*torch.rand(*e_weights.shape)
     #e_weights = torch.rand(n,n)
     model_params_quad = make_gurobi_model(A.detach().numpy(), b.detach().numpy(), None, None, gamma*np.eye(A.shape[1]))
     func = QPFunction(verbose=False, solver=QPSolvers.GUROBI, model_params=model_params_quad)
@@ -176,6 +197,7 @@ def compute_matching(current_pool_list, curr_type_weights, e_weights_by_type, ga
     # need to compute reweighting of size n(n-1)/2 + n as well.
     modified_edge_weights = jitter_e_weights - 0.5*(curr_elem_weights[x_inds] + curr_elem_weights[y_inds])
     # may need some negative signs
+    print(modified_edge_weights)
     resulting_match = func(Q_mat, -modified_edge_weights.view(-1), A, b, torch.Tensor(), torch.Tensor())
     return resulting_match, e_weights
 
@@ -329,7 +351,7 @@ def eval_func(list_of_histories, trained_weights, n_rounds = 50, n_epochs=100):
     return all_losses
 
 if __name__ == '__main__':
-    current_pool_list = [[torch.tensor(0), 0,0], [torch.tensor(1),0,0], [torch.tensor(2),0,0], [torch.tensor(0),0,0]]
+    current_pool_list = [[torch.tensor(2), 0,0], [torch.tensor(1),0,0], [torch.tensor(0),0,0]]#, [torch.tensor(0),0,0]]
     edge_weights = toy_e_weights_type()
     type_weights = torch.full((5,), 0.0, requires_grad=False)
     #print(make_matching_matrix(5))
