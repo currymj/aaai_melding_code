@@ -296,25 +296,25 @@ def eval_func(list_of_histories, trained_weights, n_rounds = 50, n_epochs=100):
         all_losses.append(losses)
     return all_losses
 
-if __name__ == '__main__':
+if __name__ == '__xxx__':
     hist = generate_full_history(toy_arrival_rates, toy_departure_probs, 50)
     edge_weights = toy_e_weights_type()
     opt_score(hist, 50, edge_weights)
 
 
-if __name__ == '__xxx__':
+if __name__ == '__main__':
     results_list = []
     train_epochs = 30
     test_epochs = 50
     n_experiments = 5
     n_rounds=50
+    edge_weights = toy_e_weights_type()
 
     for i in range(n_experiments):
+        print(i)
         print('generating histories for training')
         list_of_histories = [generate_full_history(toy_arrival_rates, toy_departure_probs, n_rounds) for e in tqdm(range(train_epochs))]
-        print(i)
         result_weights, learning_loss = train_func(list_of_histories, n_epochs=train_epochs)
-        print(learning_loss)
         print(result_weights)
         print('generating histories for testing')
         test_histories = [generate_full_history(toy_arrival_rates, toy_departure_probs, n_rounds) for e in tqdm(range(test_epochs))]
@@ -330,13 +330,30 @@ if __name__ == '__xxx__':
         const_std = np.std([np.sum(l) for l in const_loss_list])
         print('loss of initial constant weights:', const_loss)
         print('std of initial constant weights:', const_std)
-        results_list.append( (learned_loss, learned_std, const_loss, const_std) )
+
+
+        print('computing OPT scores')
+        optimal_loss_list = [opt_score(h, n_rounds, edge_weights) for h in tqdm(test_histories)]
+
+        learned_regret = [(optimal - l) for (l, optimal) in zip([np.sum(l) for l in loss_list], optimal_loss_list)]
+        learned_regret_mean = np.mean(learned_regret)
+        learned_regret_std = np.std(learned_regret)
+
+        const_regret = [(optimal - l) for (l, optimal) in zip([np.sum(l) for l in const_loss_list], optimal_loss_list)]
+        const_regret_mean = np.mean(const_regret)
+        const_regret_std = np.std(const_regret)
+
+        results_list.append( (learned_loss, learned_std, const_loss, const_std, learned_regret_mean, learned_regret_std, const_regret_mean, const_regret_std) )
 
     for i in range(n_experiments):
         print('experiment', i)
         losses = results_list[i]
         learned_ci = 1.96 * losses[1] / np.sqrt(test_epochs)
+        learned_r_ci = 1.96 * losses[5] / np.sqrt(test_epochs)
         const_ci =  1.96 * losses[3] / np.sqrt(test_epochs)
+        const_r_ci = 1.96 * losses[7] / np.sqrt(test_epochs)
 
         print(f"learned weights mean: {losses[0]} +/- {learned_ci}")
         print(f"constant weights mean: {losses[2]} +/- {const_ci}")
+        print(f'learned mean regret: {losses[4]} +/- {learned_r_ci}')
+        print(f'constant weights mean regret: {losses[6]} +/- {const_r_ci}')
