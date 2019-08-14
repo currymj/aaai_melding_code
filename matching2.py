@@ -105,9 +105,19 @@ def history_to_arrival_dict(full_history):
 def arrivals_only(current_elems, t_to_arrivals, curr_t):
     return current_elems + t_to_arrivals[curr_t]
 
+def true_match_loss(resulting_match, e_weights, match_thresh=0.6):
+    maxinds = torch.max(resulting_match, 0).indices
+    total_loss = 0.0
+    for i in range(e_weights.shape[1]):
+        if resulting_match[maxinds[i],i].item() >= match_thresh:
+            total_loss += e_weights[maxinds[i], i].item()
+    return total_loss
 
-def step_simulation(current_elems, match_edges, t_to_arrivals, curr_t, match_thresh=0.6):
-    unmatched_indices = (torch.max(match_edges, 0).values <= match_thresh).nonzero().flatten().numpy()
+def step_simulation(current_elems, match_edges, e_weights, t_to_arrivals, curr_t, match_thresh=0.6):
+    unmatched_indices = (torch.max(match_edges, 0).values < match_thresh).nonzero().flatten().numpy()
+
+    matched_indices = (torch.max(match_edges, 0).values >= match_thresh).nonzero().flatten().numpy()
+    assert(len(unmatched_indices) + len(matched_indices) == len(current_elems))
 
     # get locations of maxima
     # remove from current_elems if the maxima are <= match_threshold.
@@ -131,6 +141,7 @@ def edge_matrix(current_elems, e_weights_by_type):
     lhs_matrix = current_elems.repeat(current_elems.shape[0],1)
     rhs_matrix = lhs_matrix.t()
     return e_weights_by_type[lhs_matrix, rhs_matrix]
+
 
 def compute_matching(current_pool_list, curr_type_weights, e_weights_by_type, gamma=0.000001):
     # convert current_elems to LongTensor of correct form here
@@ -197,7 +208,7 @@ def train_func(list_of_histories, n_rounds=50, n_epochs=20):
                 continue
             resulting_match, e_weights = compute_matching(curr_pool, type_weights, e_weights_type)
             losses.append(1.0*torch.sum(e_weights * resulting_match))
-            curr_pool = step_simulation(curr_pool, resulting_match, t_to_arrivals, r)
+            curr_pool = step_simulation(curr_pool, resulting_match, e_weights, t_to_arrivals, r)
         total_loss = torch.sum(torch.stack(compute_discounted_returns(losses)))
         total_losses.append(total_loss.item())
         total_loss.backward()
@@ -275,13 +286,6 @@ def opt_score(history, max_t, e_weights_type):
 
     return total_positive_obj
 
-def true_match_loss(resulting_match, e_weights, match_thresh=0.6):
-    maxinds = torch.max(resulting_match, 0).indices
-    total_loss = 0.0
-    for i in range(e_weights.shape[1]):
-        if resulting_match[maxinds[i],i].item() > match_thresh:
-            total_loss += e_weights[maxinds[i], i].item()
-    return total_loss
 
 def eval_func(list_of_histories, trained_weights, n_rounds = 50, n_epochs=100):
     e_weights_type = toy_e_weights_type()
@@ -303,9 +307,8 @@ def eval_func(list_of_histories, trained_weights, n_rounds = 50, n_epochs=100):
             #if abs(new_loss - old_loss) > 0.1:
                 #print(f'old - new: {old_loss - new_loss}')
                 #print(resulting_match)
-                #print(e_weights)
             losses.append(1.0*true_match_loss(resulting_match, e_weights))
-            curr_pool = step_simulation(curr_pool, resulting_match, t_to_arrivals, r)
+            curr_pool = step_simulation(curr_pool, resulting_match, e_weights, t_to_arrivals, r)
         if len(losses) == 0:
             losses.append(0.0)
         all_losses.append(losses)
