@@ -21,29 +21,33 @@ def make_matching_matrix(n):
     # n is num elements?
     
     # n_vars is 1 per possible edge?
-    n_vars = n*n
-    # n_constraints is 1 for each lhs, 1 for each rhs, 1 per edge?
-    n_constraints = 2 * n_vars
+    n_vars = int((n*(n-1))/2) + n
+    # n_constraints is 1 for each var, 1 per edge?
+    n_constraints = n + n_vars
     A = np.zeros((n_constraints, n_vars))
     b = np.zeros((n_constraints))
     curr_idx = 0
     edge_idx = {}
     # get an index per edge
     for u in range(n):
-        for v in range(n):
+        for v in range(u,n):
+            assert (u, v) not in edge_idx
+            assert (v, u) not in edge_idx
             edge_idx[(u,v)] = curr_idx
+            edge_idx[(v,u)] = curr_idx
             curr_idx += 1
     # matching program constraints 
     for u in range(n):
         for v in range(n):
             A[u, edge_idx[(u,v)]] = 1
-            A[n_vars+edge_idx[(u, v)], edge_idx[(u, v)]] = -1
+            A[n+edge_idx[(u, v)], edge_idx[(u, v)]] = -1
 
     # each element can have only 1 edge turned on in x
     for u in range(n):
         b[u] = 1
     
     
+    print(A)
     return A, b
 
 def ind_counts_to_longs(arrival_counts):
@@ -105,6 +109,8 @@ def true_match_loss(resulting_match, e_weights, match_thresh=0.6):
     return total_loss
 
 def step_simulation(current_elems, match_edges, e_weights, t_to_arrivals, curr_t, match_thresh=0.6):
+    print(current_elems)
+    print(match_edges)
     unmatched_indices = (torch.max(match_edges, 0).values < match_thresh).nonzero().flatten().numpy()
 
     matched_indices = (torch.max(match_edges, 0).values >= match_thresh).nonzero().flatten().numpy()
@@ -293,11 +299,11 @@ def eval_func(list_of_histories, trained_weights, n_rounds = 50, n_epochs=100):
                 continue
             resulting_match, e_weights = compute_matching(curr_pool, type_weights, e_weights_type)
             #losses.append(1.0*torch.sum(resulting_match * e_weights).item())
-            #old_loss = 1.0*torch.sum(resulting_match * e_weights).item()
-            #new_loss = 1.0*true_match_loss(resulting_match, e_weights)
-            #if abs(new_loss - old_loss) > 0.1:
-                #print(f'old - new: {old_loss - new_loss}')
-                #print(resulting_match)
+            old_loss = 1.0*torch.sum(resulting_match * e_weights).item()
+            new_loss = 1.0*true_match_loss(resulting_match, e_weights)
+            if abs(new_loss - old_loss) > 0.1:
+                print(f'old - new: {old_loss - new_loss}')
+                print(resulting_match)
             losses.append(1.0*true_match_loss(resulting_match, e_weights))
             curr_pool = step_simulation(curr_pool, resulting_match, e_weights, t_to_arrivals, r)
         if len(losses) == 0:
@@ -305,11 +311,17 @@ def eval_func(list_of_histories, trained_weights, n_rounds = 50, n_epochs=100):
         all_losses.append(losses)
     return all_losses
 
-
-
 if __name__ == '__main__':
+    current_pool_list = [[torch.tensor(0), 0,0], [torch.tensor(1),0,0], [torch.tensor(2),0,0], [torch.tensor(0),0,0]]
+    edge_weights = toy_e_weights_type()
+    type_weights = torch.full((5,), 0.0, requires_grad=False)
+    make_matching_matrix(3)
+    print(compute_matching(current_pool_list, type_weights, edge_weights))
+
+
+if __name__ == '__xxx__':
     results_list = []
-    train_epochs = 30
+    train_epochs = 5 
     test_epochs = 50
     n_experiments = 1
     n_rounds=50
