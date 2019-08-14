@@ -47,7 +47,6 @@ def make_matching_matrix(n):
         b[u] = 1
     
     
-    print(A)
     return A, b
 
 def ind_counts_to_longs(arrival_counts):
@@ -134,22 +133,39 @@ def step_simulation(current_elems, match_edges, e_weights, t_to_arrivals, curr_t
     
     return after_arrivals
 
-def edge_matrix(current_elems, e_weights_by_type):
-    lhs_matrix = current_elems.repeat(current_elems.shape[0],1)
-    rhs_matrix = lhs_matrix.t()
-    return e_weights_by_type[lhs_matrix, rhs_matrix]
+def edge_matrix(current_elems, x_inds, y_inds, e_weights_by_type):
+    # have a list of elements (as tensor of longs)
+    # want a list of edge weights of same size as edge variables
+    # need to compute weights of size n(n-1)/2 + n in correct order
+    # should probably just return already flattened
+    left_types = current_elems[x_inds]
+    right_types = current_elems[y_inds]
 
+    return e_weights_by_type[left_types, right_types]
+
+
+def edge_ind_tensors(n):
+    x_coords = []
+    y_coords = []
+    for x in range(n):
+        for y in range(x, n):
+            x_coords.append(x)
+            y_coords.append(y)
+    return torch.LongTensor(x_coords), torch.LongTensor(y_coords)
 
 def compute_matching(current_pool_list, curr_type_weights, e_weights_by_type, gamma=0.000001):
     # convert current_elems to LongTensor of correct form here
     current_elems = torch.tensor([x[0] for x in current_pool_list])
     n = current_elems.shape[0]
     A, b = make_matching_matrix(n)
+    x_inds, y_inds = edge_ind_tensors(n)
     A = torch.from_numpy(A).float()
     b = torch.from_numpy(b).float()
+
     # for some reason we need this randomness to end up with an actual matching
-    e_weights = edge_matrix(current_elems, e_weights_by_type)
-    jitter_e_weights = e_weights + 1e-4*torch.rand(n,n)
+    e_weights = edge_matrix(current_elems, x_inds, y_inds, e_weights_by_type)
+    # change jitter to be n(n-1)/2 + n
+    jitter_e_weights = e_weights + 1e-4*torch.rand(*e_weights.shape)
     #e_weights = torch.rand(n,n)
     model_params_quad = make_gurobi_model(A.detach().numpy(), b.detach().numpy(), None, None, gamma*np.eye(A.shape[1]))
     func = QPFunction(verbose=False, solver=QPSolvers.GUROBI, model_params=model_params_quad)
@@ -157,9 +173,10 @@ def compute_matching(current_pool_list, curr_type_weights, e_weights_by_type, ga
     Q_mat = gamma*torch.eye(A.shape[1])
     
     curr_elem_weights = curr_type_weights[current_elems]
-    modified_edge_weights = jitter_e_weights - 0.5*(torch.unsqueeze(curr_elem_weights,0) + torch.unsqueeze(curr_elem_weights,1))
+    # need to compute reweighting of size n(n-1)/2 + n as well.
+    modified_edge_weights = jitter_e_weights - 0.5*(curr_elem_weights[x_inds] + curr_elem_weights[y_inds])
     # may need some negative signs
-    resulting_match = func(Q_mat, -modified_edge_weights.view(-1), A, b, torch.Tensor(), torch.Tensor()).view(n,n)
+    resulting_match = func(Q_mat, -modified_edge_weights.view(-1), A, b, torch.Tensor(), torch.Tensor())
     return resulting_match, e_weights
 
 
@@ -315,7 +332,8 @@ if __name__ == '__main__':
     current_pool_list = [[torch.tensor(0), 0,0], [torch.tensor(1),0,0], [torch.tensor(2),0,0], [torch.tensor(0),0,0]]
     edge_weights = toy_e_weights_type()
     type_weights = torch.full((5,), 0.0, requires_grad=False)
-    make_matching_matrix(3)
+    #print(make_matching_matrix(5))
+
     print(compute_matching(current_pool_list, type_weights, edge_weights))
 
 
