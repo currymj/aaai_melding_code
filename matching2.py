@@ -99,13 +99,11 @@ def history_to_arrival_dict(full_history):
 def arrivals_only(current_elems, t_to_arrivals, curr_t):
     return current_elems + t_to_arrivals[curr_t]
 
-def true_match_loss(resulting_match, e_weights, match_thresh=0.6):
-    raise NotImplementedError
-    maxinds = torch.max(resulting_match, 0).indices
+def true_match_loss(resulting_match, e_weights, match_thresh=0.8):
     total_loss = 0.0
-    for i in range(e_weights.shape[1]):
-        if resulting_match[maxinds[i],i].item() >= match_thresh:
-            total_loss += e_weights[maxinds[i], i].item()
+    for i in range(e_weights.shape[0]):
+        if resulting_match[i].item() >= match_thresh:
+            total_loss += e_weights[i].item()
     return total_loss
 
 def edge_ind_tensors(n):
@@ -118,24 +116,25 @@ def edge_ind_tensors(n):
     return torch.LongTensor(x_coords), torch.LongTensor(y_coords)
 
 def step_simulation(current_elems, match_edges, e_weights, t_to_arrivals, curr_t, match_thresh=0.6):
-    print(current_elems)
-    print(match_edges)
 
     x_inds, y_inds = edge_ind_tensors(len(current_elems))
-    matched_indices = (match_edges.flatten() > 0.8).nonzero().numpy()
-    print(x_inds[matched_indices.flatten()])
+    match_edges = (match_edges.flatten() > 0.8).nonzero().numpy()
+    matched_vertices = set(x_inds[match_edges.flatten()].numpy().tolist()).union(set(y_inds[match_edges.flatten()].numpy().tolist()))
+    # should be same
+
+    
     #unmatched_indices = (torch.max(match_edges, 0).values < match_thresh).nonzero().flatten().numpy()
 
     #matched_indices = (torch.max(match_edges, 0).values >= match_thresh).nonzero().flatten().numpy()
     #assert(len(unmatched_indices) + len(matched_indices) == len(current_elems))
 
-    raise NotImplementedError
+   
     # get locations of maxima
     # remove from current_elems if the maxima are <= match_threshold.
 
     pool_after_match = []
     for i in range(len(current_elems)):
-        if i in unmatched_indices:
+        if i not in matched_vertices:
             pool_after_match.append(current_elems[i])
     
     remaining_elements = [] 
@@ -184,7 +183,7 @@ def compute_matching(current_pool_list, curr_type_weights, e_weights_by_type, ga
     b = torch.from_numpy(b).float()
 
     # for some reason we need this randomness to end up with an actual matching
-    e_weights = edge_matrix(current_elems, x_inds, y_inds, e_weights_by_type)
+    e_weights = forbid_self_match(edge_matrix(current_elems, x_inds, y_inds, e_weights_by_type), edge_idx, n)
     # change jitter to be n(n-1)/2 + n
     jitter_e_weights = e_weights + 1e-3*torch.rand(*e_weights.shape)
     #e_weights = torch.rand(n,n)
@@ -197,8 +196,7 @@ def compute_matching(current_pool_list, curr_type_weights, e_weights_by_type, ga
     # need to compute reweighting of size n(n-1)/2 + n as well.
     modified_edge_weights = jitter_e_weights - 0.5*(curr_elem_weights[x_inds] + curr_elem_weights[y_inds])
     # may need some negative signs
-    print(modified_edge_weights)
-    resulting_match = func(Q_mat, -modified_edge_weights.view(-1), A, b, torch.Tensor(), torch.Tensor())
+    resulting_match = func(Q_mat, -modified_edge_weights.view(-1), A, b, torch.Tensor(), torch.Tensor()).flatten()
     return resulting_match, e_weights
 
 
@@ -350,7 +348,7 @@ def eval_func(list_of_histories, trained_weights, n_rounds = 50, n_epochs=100):
         all_losses.append(losses)
     return all_losses
 
-if __name__ == '__main__':
+if __name__ == '__xxx___':
     current_pool_list = [[torch.tensor(2), 0,0], [torch.tensor(1),0,0], [torch.tensor(0),0,0]]#, [torch.tensor(0),0,0]]
     edge_weights = toy_e_weights_type()
     type_weights = torch.full((5,), 0.0, requires_grad=False)
@@ -359,9 +357,9 @@ if __name__ == '__main__':
     print(compute_matching(current_pool_list, type_weights, edge_weights))
 
 
-if __name__ == '__xxx__':
+if __name__ == '__main__':
     results_list = []
-    train_epochs = 5 
+    train_epochs = 100 
     test_epochs = 50
     n_experiments = 1
     n_rounds=50
