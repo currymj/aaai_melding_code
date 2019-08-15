@@ -75,6 +75,10 @@ class CurrentElems:
         self.rhs = rhs
 
 
+def both_sides_history(type_arrival_rates, type_departure_probs, max_t):
+    return History(generate_full_history(type_arrival_rates, type_departure_probs, max_t), 
+            generate_full_history(type_arrival_rates, type_departure_probs, max_t))
+
 def generate_full_history(type_arrival_rates, type_departure_probs, max_t):
     # an element is a list of (type, start_time, end_time)
     # too bad we don't have mutable namedtuples here, and it's probably not
@@ -114,7 +118,7 @@ def history_to_arrival_dict(full_history):
 
 
 def arrivals_only(current_elems, l_t_to_arrivals, r_t_to_arrivals, curr_t):
-    return CurrentElems(current_elems.lhs + l_t_to_arrivals[curr_t], current_elems.rhs + r_to_to_arrivals[curr_t])
+    return CurrentElems(current_elems.lhs + l_t_to_arrivals[curr_t], current_elems.rhs + r_t_to_arrivals[curr_t])
 
 def true_match_loss(resulting_match, e_weights, match_thresh=0.6):
     maxinds = torch.max(resulting_match, 0).indices
@@ -149,7 +153,7 @@ def step_simulation(current_elems, match_edges, e_weights, l_t_to_arrivals, r_t_
     
     for j in range(len(current_elems.rhs)):
         if j not in rhs_matched_inds:
-            pool_after_match.rhs.append(current_elems.rhs[i])
+            pool_after_match.rhs.append(current_elems.rhs[j])
 
     remaining_elements = CurrentElems([], [])
     for v in pool_after_match.lhs:
@@ -239,17 +243,18 @@ def train_func(list_of_histories, n_rounds=50, n_epochs=20):
     total_losses = []
     for e in tqdm(range(n_epochs)):
         full_history = list_of_histories[e]
-        t_to_arrivals = history_to_arrival_dict(full_history)
+        l_t_to_arrivals = history_to_arrival_dict(full_history.lhs)
+        r_t_to_arrivals = history_to_arrival_dict(full_history.rhs)
         optimizer.zero_grad()
         losses = []
-        curr_pool = []
+        curr_pool = CurrentElems([], [])
         for r in range(n_rounds):
-            if len(curr_pool) <= 1:
-                curr_pool = arrivals_only(curr_pool, t_to_arrivals, r)
+            if len(curr_pool.lhs) <= 0 or len(curr_pool.rhs) <= 0:
+                curr_pool = arrivals_only(curr_pool, l_t_to_arrivals, r_t_to_arrivals, r)
                 continue
             resulting_match, e_weights = compute_matching(curr_pool, type_weights, e_weights_type)
             losses.append(1.0*torch.sum(e_weights * resulting_match))
-            curr_pool = step_simulation(curr_pool, resulting_match, e_weights, t_to_arrivals, r)
+            curr_pool = step_simulation(curr_pool, resulting_match, e_weights, l_t_to_arrivals, r_t_to_arrivals, r)
         total_loss = torch.sum(torch.stack(compute_discounted_returns(losses)))
         total_losses.append(total_loss.item())
         total_loss.backward()
@@ -334,28 +339,30 @@ def eval_func(list_of_histories, trained_weights, n_rounds = 50, n_epochs=100):
     all_losses = []
     for e in tqdm(range(n_epochs)):
         full_history = list_of_histories[e]
-        t_to_arrivals = history_to_arrival_dict(full_history)
+        l_t_to_arrivals = history_to_arrival_dict(full_history.lhs)
+        r_t_to_arrivals = history_to_arrival_dict(full_history.rhs)
         losses = []
-        curr_pool = []
+        curr_pool = CurrentElems([], [])
         for r in range(n_rounds):
-            if len(curr_pool) <= 1:
-                curr_pool = arrivals_only(curr_pool, t_to_arrivals, r)
+            if len(curr_pool.lhs) <= 0 or len(curr_pool.rhs) <= 0:
+                curr_pool = arrivals_only(curr_pool, l_t_to_arrivals, r_t_to_arrivals, r)
+                losses.append(0.0)
                 continue
             resulting_match, e_weights = compute_matching(curr_pool, type_weights, e_weights_type)
-            #losses.append(1.0*torch.sum(resulting_match * e_weights).item())
+            losses.append(1.0*torch.sum(resulting_match * e_weights).item())
             #old_loss = 1.0*torch.sum(resulting_match * e_weights).item()
             #new_loss = 1.0*true_match_loss(resulting_match, e_weights)
             #if abs(new_loss - old_loss) > 0.1:
                 #print(f'old - new: {old_loss - new_loss}')
                 #print(resulting_match)
-            losses.append(1.0*true_match_loss(resulting_match, e_weights))
-            curr_pool = step_simulation(curr_pool, resulting_match, e_weights, t_to_arrivals, r)
+            #losses.append(1.0*true_match_loss(resulting_match, e_weights))
+            curr_pool = step_simulation(curr_pool, resulting_match, e_weights, l_t_to_arrivals, r_t_to_arrivals, r)
         if len(losses) == 0:
             losses.append(0.0)
         all_losses.append(losses)
     return all_losses
 
-if __name__ == '__main__':
+if __name__ == '__xxx__':
     hist = History(generate_full_history(toy_arrival_rates, toy_departure_probs, 50), generate_full_history(toy_arrival_rates, toy_departure_probs, 50))
     l_dict = history_to_arrival_dict(hist.lhs)
     r_dict = history_to_arrival_dict(hist.rhs)
@@ -367,8 +374,7 @@ if __name__ == '__main__':
     print(hist)
     print(step_simulation(currpool, resulting_match, e_weights, l_dict, r_dict, 1).lhs)
 
-
-if __name__ == '__xxx__':
+if __name__ == '__main__':
     results_list = []
     train_epochs = 30
     test_epochs = 50
@@ -379,11 +385,11 @@ if __name__ == '__xxx__':
     for i in range(n_experiments):
         print(i)
         print('generating histories for training')
-        list_of_histories = [generate_full_history(toy_arrival_rates, toy_departure_probs, n_rounds) for e in tqdm(range(train_epochs))]
+        list_of_histories = [both_sides_history(toy_arrival_rates, toy_departure_probs, n_rounds) for e in tqdm(range(train_epochs))]
         result_weights, learning_loss = train_func(list_of_histories, n_epochs=train_epochs)
         print(result_weights)
         print('generating histories for testing')
-        test_histories = [generate_full_history(toy_arrival_rates, toy_departure_probs, n_rounds) for e in tqdm(range(test_epochs))]
+        test_histories = [both_sides_history(toy_arrival_rates, toy_departure_probs, n_rounds) for e in tqdm(range(test_epochs))]
         loss_list = eval_func(test_histories, result_weights, n_epochs=test_epochs)
         learned_loss = np.mean([np.sum(l) for l in loss_list])
         learned_std = np.std([np.sum(l) for l in loss_list])
