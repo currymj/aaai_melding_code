@@ -128,20 +128,25 @@ def true_match_loss(resulting_match, e_weights, match_thresh=0.6):
             total_loss += e_weights[maxinds[i], i].item()
     return total_loss
 
+
 def step_simulation(current_elems, match_edges, e_weights, l_t_to_arrivals, r_t_to_arrivals, curr_t, match_thresh=0.8):
-    def get_matched_indices(match_edges):
+
+
+
+    def get_matched_indices(match_edges, e_weights):
         lhs_matched_inds = []
         rhs_matched_inds = []
+        total_true_loss = 0.0
         for i in range(match_edges.shape[0]):
             max_val, max_ind = torch.max(match_edges[i], 0)
             if max_val > match_thresh:
                 lhs_matched_inds.append(i)
                 rhs_matched_inds.append(max_ind.item())
-        return lhs_matched_inds, rhs_matched_inds
+                total_true_loss += e_weights[i, max_ind].item()
 
+        return lhs_matched_inds, rhs_matched_inds, total_true_loss
 
-
-    lhs_matched_inds, rhs_matched_inds = get_matched_indices(match_edges)
+    lhs_matched_inds, rhs_matched_inds, total_true_loss = get_matched_indices(match_edges, e_weights)
     # get locations of maxima
     # remove from current_elems if the maxima are <= match_threshold.
 
@@ -174,7 +179,7 @@ def weight_matrix(lhs_current_elems, rhs_current_elems, weights_by_type):
     weights_result = torch.zeros(lhs_current_elems.shape[0], rhs_current_elems.shape[0])
     for i in range(lhs_current_elems.shape[0]):
         for j in range(rhs_current_elems.shape[0]):
-            weights_result = weights_by_type[lhs_current_elems[i],rhs_current_elems[j]]
+            weights_result[i,j] = weights_by_type[lhs_current_elems[i],rhs_current_elems[j]]
     return weights_result
 
 def type_weight_matrix(lhs_current_elems, rhs_current_elems, weights_by_type):
@@ -182,7 +187,7 @@ def type_weight_matrix(lhs_current_elems, rhs_current_elems, weights_by_type):
     weights_result = torch.zeros(lhs_current_elems.shape[0], rhs_current_elems.shape[0])
     for i in range(lhs_current_elems.shape[0]):
         for j in range(rhs_current_elems.shape[0]):
-            weights_result = weights_by_type[lhs_current_elems[i]] + weights_by_type[rhs_current_elems[j]]
+            weights_result[i, j] = weights_by_type[lhs_current_elems[i]] + weights_by_type[rhs_current_elems[j]]
     return weights_result
 
 def compute_matching(current_pool_list, curr_type_weights, e_weights_by_type, gamma=0.000001):
@@ -196,7 +201,7 @@ def compute_matching(current_pool_list, curr_type_weights, e_weights_by_type, ga
     A = torch.from_numpy(A).float()
     b = torch.from_numpy(b).float()
     # should take lhs and rhs
-    e_weights = weight_matrix(lhs_current_elems, rhs_current_elems, e_weights_by_type)
+    e_weights = weight_matrix(lhs_current_elems, rhs_current_elems, e_weights_by_type).view(l_n, r_n)
     jitter_e_weights = e_weights + 1e-4*torch.rand(l_n,r_n)
     #e_weights = torch.rand(n,n)
     model_params_quad = make_gurobi_model(A.detach().numpy(), b.detach().numpy(), None, None, gamma*np.eye(A.shape[1]))
@@ -204,7 +209,7 @@ def compute_matching(current_pool_list, curr_type_weights, e_weights_by_type, ga
     
     Q_mat = gamma*torch.eye(A.shape[1])
     
-    curr_elem_weights = type_weight_matrix(lhs_current_elems, rhs_current_elems, curr_type_weights)
+    curr_elem_weights = type_weight_matrix(lhs_current_elems, rhs_current_elems, curr_type_weights).view(l_n, r_n)
     modified_edge_weights = jitter_e_weights - 0.5*(curr_elem_weights)
     # may need some negative signs
     resulting_match = func(Q_mat, -modified_edge_weights.view(-1), A, b, torch.Tensor(), torch.Tensor()).view(l_n, r_n)
