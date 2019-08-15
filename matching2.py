@@ -172,7 +172,7 @@ def step_simulation(current_elems, match_edges, e_weights, l_t_to_arrivals, r_t_
     after_arrivals_lhs = remaining_elements.lhs + l_t_to_arrivals[curr_t]
     after_arrivals_rhs = remaining_elements.rhs + r_t_to_arrivals[curr_t]
     
-    return CurrentElems(after_arrivals_lhs, after_arrivals_rhs)
+    return CurrentElems(after_arrivals_lhs, after_arrivals_rhs), total_true_loss
 
 def weight_matrix(lhs_current_elems, rhs_current_elems, weights_by_type):
     # optimize later
@@ -259,7 +259,7 @@ def train_func(list_of_histories, n_rounds=50, n_epochs=20):
                 continue
             resulting_match, e_weights = compute_matching(curr_pool, type_weights, e_weights_type)
             losses.append(1.0*torch.sum(e_weights * resulting_match))
-            curr_pool = step_simulation(curr_pool, resulting_match, e_weights, l_t_to_arrivals, r_t_to_arrivals, r)
+            curr_pool, true_loss = step_simulation(curr_pool, resulting_match, e_weights, l_t_to_arrivals, r_t_to_arrivals, r)
         total_loss = torch.sum(torch.stack(compute_discounted_returns(losses)))
         total_losses.append(total_loss.item())
         total_loss.backward()
@@ -354,14 +354,15 @@ def eval_func(list_of_histories, trained_weights, n_rounds = 50, n_epochs=100):
                 losses.append(0.0)
                 continue
             resulting_match, e_weights = compute_matching(curr_pool, type_weights, e_weights_type)
-            losses.append(1.0*torch.sum(resulting_match * e_weights).item())
+            #losses.append(1.0*torch.sum(resulting_match * e_weights).item())
             #old_loss = 1.0*torch.sum(resulting_match * e_weights).item()
             #new_loss = 1.0*true_match_loss(resulting_match, e_weights)
             #if abs(new_loss - old_loss) > 0.1:
                 #print(f'old - new: {old_loss - new_loss}')
                 #print(resulting_match)
             #losses.append(1.0*true_match_loss(resulting_match, e_weights))
-            curr_pool = step_simulation(curr_pool, resulting_match, e_weights, l_t_to_arrivals, r_t_to_arrivals, r)
+            curr_pool, true_loss = step_simulation(curr_pool, resulting_match, e_weights, l_t_to_arrivals, r_t_to_arrivals, r)
+            losses.append(true_loss)
         if len(losses) == 0:
             losses.append(0.0)
         all_losses.append(losses)
@@ -382,8 +383,8 @@ if __name__ == '__xxx__':
 if __name__ == '__main__':
     results_list = []
     train_epochs = 30
-    test_epochs = 50
-    n_experiments = 1
+    test_epochs = 100
+    n_experiments = 3
     n_rounds=50
     edge_weights = toy_e_weights_type()
 
