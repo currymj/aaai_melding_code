@@ -16,11 +16,12 @@ from collections import defaultdict
 # also we want to force cycle variables to be positive, as in edges below.
 
 
-def make_matching_matrix(n):
+def make_matching_matrix(l_n, r_n):
+# should take lhs and rhs sizes
+
     
-    # n is num elements?
-    lhs = list(range(n))
-    rhs = list(range(n, 2*n))
+    lhs = list(range(l_n))
+    rhs = list(range(l_n, l_n + r_n))
     
     # n_vars is 1 per possible edge?
     n_vars = len(lhs)*len(rhs)
@@ -63,6 +64,16 @@ def ind_counts_to_longs(arrival_counts):
             results.append(i)
     return torch.LongTensor(results)
 
+class History:
+    def __init__(self, lhs, rhs):
+        self.lhs = lhs
+        self.rhs = rhs
+
+class CurrentElems:
+    def __init__(self, lhs, rhs):
+        self.lhs = lhs
+        self.rhs = rhs
+
 
 def generate_full_history(type_arrival_rates, type_departure_probs, max_t):
     # an element is a list of (type, start_time, end_time)
@@ -102,8 +113,8 @@ def history_to_arrival_dict(full_history):
     return result
 
 
-def arrivals_only(current_elems, t_to_arrivals, curr_t):
-    return current_elems + t_to_arrivals[curr_t]
+def arrivals_only(current_elems, l_t_to_arrivals, r_t_to_arrivals, curr_t):
+    return CurrentElems(current_elems.lhs + l_t_to_arrivals[curr_t], current_elems.rhs + r_to_to_arrivals[curr_t])
 
 def true_match_loss(resulting_match, e_weights, match_thresh=0.6):
     maxinds = torch.max(resulting_match, 0).indices
@@ -113,56 +124,86 @@ def true_match_loss(resulting_match, e_weights, match_thresh=0.6):
             total_loss += e_weights[maxinds[i], i].item()
     return total_loss
 
-def step_simulation(current_elems, match_edges, e_weights, t_to_arrivals, curr_t, match_thresh=0.6):
-    unmatched_indices = (torch.max(match_edges, 0).values < match_thresh).nonzero().flatten().numpy()
+def step_simulation(current_elems, match_edges, e_weights, l_t_to_arrivals, r_t_to_arrivals, curr_t, match_thresh=0.8):
+    def get_matched_indices(match_edges):
+        lhs_matched_inds = []
+        rhs_matched_inds = []
+        for i in range(match_edges.shape[0]):
+            max_val, max_ind = torch.max(match_edges[i], 0)
+            if max_val > match_thresh:
+                lhs_matched_inds.append(i)
+                rhs_matched_inds.append(max_ind.item())
+        return lhs_matched_inds, rhs_matched_inds
 
-    matched_indices = (torch.max(match_edges, 0).values >= match_thresh).nonzero().flatten().numpy()
-    assert(len(unmatched_indices) + len(matched_indices) == len(current_elems))
 
+
+    lhs_matched_inds, rhs_matched_inds = get_matched_indices(match_edges)
     # get locations of maxima
     # remove from current_elems if the maxima are <= match_threshold.
 
-    pool_after_match = []
-    for i in range(len(current_elems)):
-        if i in unmatched_indices:
-            pool_after_match.append(current_elems[i])
+    pool_after_match = CurrentElems([],[])
+
+    for i in range(len(current_elems.lhs)):
+        if i not in lhs_matched_inds:
+            pool_after_match.lhs.append(current_elems.lhs[i])
     
-    remaining_elements = [] 
-    for v in pool_after_match:
+    for j in range(len(current_elems.rhs)):
+        if j not in rhs_matched_inds:
+            pool_after_match.rhs.append(current_elems.rhs[i])
+
+    remaining_elements = CurrentElems([], [])
+    for v in pool_after_match.lhs:
         if v[2] > curr_t:
-            remaining_elements.append(v)
+            remaining_elements.lhs.append(v)
+    for v in pool_after_match.rhs:
+        if v[2] > curr_t:
+            remaining_elements.rhs.append(v)
 
     # now get new elements (poisson?)
-    after_arrivals = remaining_elements + t_to_arrivals[curr_t]
+    after_arrivals_lhs = remaining_elements.lhs + l_t_to_arrivals[curr_t]
+    after_arrivals_rhs = remaining_elements.rhs + r_t_to_arrivals[curr_t]
     
-    return after_arrivals
+    return CurrentElems(after_arrivals_lhs, after_arrivals_rhs)
 
-def edge_matrix(current_elems, e_weights_by_type):
-    lhs_matrix = current_elems.repeat(current_elems.shape[0],1)
-    rhs_matrix = lhs_matrix.t()
-    return e_weights_by_type[lhs_matrix, rhs_matrix]
+def weight_matrix(lhs_current_elems, rhs_current_elems, weights_by_type):
+    # optimize later
+    weights_result = torch.zeros(lhs_current_elems.shape[0], rhs_current_elems.shape[0])
+    for i in range(lhs_current_elems.shape[0]):
+        for j in range(rhs_current_elems.shape[0]):
+            weights_result = weights_by_type[lhs_current_elems[i],rhs_current_elems[j]]
+    return weights_result
 
+def type_weight_matrix(lhs_current_elems, rhs_current_elems, weights_by_type):
+    # optimize later
+    weights_result = torch.zeros(lhs_current_elems.shape[0], rhs_current_elems.shape[0])
+    for i in range(lhs_current_elems.shape[0]):
+        for j in range(rhs_current_elems.shape[0]):
+            weights_result = weights_by_type[lhs_current_elems[i]] + weights_by_type[rhs_current_elems[j]]
+    return weights_result
 
 def compute_matching(current_pool_list, curr_type_weights, e_weights_by_type, gamma=0.000001):
-    # convert current_elems to LongTensor of correct form here
-    current_elems = torch.tensor([x[0] for x in current_pool_list])
-    n = current_elems.shape[0]
-    A, b = make_matching_matrix(n)
+
+    # current_pool_list should have lhs and rhs, get them both as tensors
+    lhs_current_elems = torch.tensor([x[0] for x in current_pool_list.lhs])
+    rhs_current_elems = torch.tensor([x[0] for x in current_pool_list.rhs])
+    l_n = lhs_current_elems.shape[0]
+    r_n = rhs_current_elems.shape[0]
+    A, b = make_matching_matrix(l_n, r_n)
     A = torch.from_numpy(A).float()
     b = torch.from_numpy(b).float()
-    # for some reason we need this randomness to end up with an actual matching
-    e_weights = edge_matrix(current_elems, e_weights_by_type)
-    jitter_e_weights = e_weights + 1e-4*torch.rand(n,n)
+    # should take lhs and rhs
+    e_weights = weight_matrix(lhs_current_elems, rhs_current_elems, e_weights_by_type)
+    jitter_e_weights = e_weights + 1e-4*torch.rand(l_n,r_n)
     #e_weights = torch.rand(n,n)
     model_params_quad = make_gurobi_model(A.detach().numpy(), b.detach().numpy(), None, None, gamma*np.eye(A.shape[1]))
     func = QPFunction(verbose=False, solver=QPSolvers.GUROBI, model_params=model_params_quad)
     
     Q_mat = gamma*torch.eye(A.shape[1])
     
-    curr_elem_weights = curr_type_weights[current_elems]
-    modified_edge_weights = jitter_e_weights - 0.5*(torch.unsqueeze(curr_elem_weights,0) + torch.unsqueeze(curr_elem_weights,1))
+    curr_elem_weights = type_weight_matrix(lhs_current_elems, rhs_current_elems, curr_type_weights)
+    modified_edge_weights = jitter_e_weights - 0.5*(curr_elem_weights)
     # may need some negative signs
-    resulting_match = func(Q_mat, -modified_edge_weights.view(-1), A, b, torch.Tensor(), torch.Tensor()).view(n,n)
+    resulting_match = func(Q_mat, -modified_edge_weights.view(-1), A, b, torch.Tensor(), torch.Tensor()).view(l_n, r_n)
     return resulting_match, e_weights
 
 
@@ -314,13 +355,20 @@ def eval_func(list_of_histories, trained_weights, n_rounds = 50, n_epochs=100):
         all_losses.append(losses)
     return all_losses
 
-if __name__ == '__xxx__':
-    hist = generate_full_history(toy_arrival_rates, toy_departure_probs, 50)
-    edge_weights = toy_e_weights_type()
-    opt_score(hist, 50, edge_weights)
-
-
 if __name__ == '__main__':
+    hist = History(generate_full_history(toy_arrival_rates, toy_departure_probs, 50), generate_full_history(toy_arrival_rates, toy_departure_probs, 50))
+    l_dict = history_to_arrival_dict(hist.lhs)
+    r_dict = history_to_arrival_dict(hist.rhs)
+    currpool = CurrentElems([[torch.tensor(1),0,5], [torch.tensor(2),0,5], [torch.tensor(2),0,5]], [[torch.tensor(1), 0,5], [torch.tensor(1),0,5]])
+    edge_weights = toy_e_weights_type()
+    type_weights = torch.full((5,), 0.0, requires_grad=False)
+    resulting_match, e_weights = compute_matching(currpool, type_weights, edge_weights)
+    print(resulting_match)
+    print(hist)
+    print(step_simulation(currpool, resulting_match, e_weights, l_dict, r_dict, 1).lhs)
+
+
+if __name__ == '__xxx__':
     results_list = []
     train_epochs = 30
     test_epochs = 50
